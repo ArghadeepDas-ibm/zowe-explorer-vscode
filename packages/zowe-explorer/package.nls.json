@@ -152,6 +152,7 @@
   "zowe.security.secureCredentialsEnabled": "Allow credentials to be stored securely. If disabled and autoStore is set to true, z/OS credentials are stored as clear text in zowe.config.json.",
   "zowe.openRecentMember": "Open Recent Member",
   "zowe.displayReleaseNotes": "Display Release Notes",
+  "zowe.editZoweConfig": "Edit Zowe Config",
   "issueTsoCmd": "Issue TSO Command",
   "deleteProfile": "Delete a Profile Permanently...",
   "renameDataSet": "Rename Data Set",

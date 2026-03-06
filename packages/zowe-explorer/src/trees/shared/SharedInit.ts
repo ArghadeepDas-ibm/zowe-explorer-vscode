@@ -28,6 +28,7 @@ import {
     FsJobsUtils,
 } from "@zowe/zowe-explorer-api";
 import { SharedActions } from "./SharedActions";
+import { ConfigEditor } from "../../utils/ConfigEditor";
 import { SharedHistoryView } from "./SharedHistoryView";
 import { SharedTreeProviders } from "./SharedTreeProviders";
 import { JobActions } from "../job/JobActions";
@@ -102,6 +103,12 @@ export class SharedInit {
         context.subscriptions.push(
             vscode.commands.registerCommand("zowe.displayReleaseNotes", () => {
                 ReleaseNotes.display(context, true); // Always display when command is run
+            })
+        );
+
+        context.subscriptions.push(
+            vscode.commands.registerCommand("zowe.editZoweConfig", async () => {
+                await ConfigEditor.display(context);
             })
         );
 

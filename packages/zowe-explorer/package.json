@@ -762,6 +762,11 @@
         "command": "zowe.displayReleaseNotes",
         "title": "%zowe.displayReleaseNotes%",
         "category": "Zowe Explorer"
+      },
+      {
+        "command": "zowe.editZoweConfig",
+        "title": "%zowe.editZoweConfig%",
+        "category": "Zowe Explorer"
       }
     ],
     "menus": {

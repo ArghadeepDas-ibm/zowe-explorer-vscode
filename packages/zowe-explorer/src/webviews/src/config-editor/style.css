@@ -1,0 +1,142 @@
+/**
+ * This program and the accompanying materials are made available under the terms of the
+ * Eclipse Public License v2.0 which accompanies this distribution, and is available at
+ * https://www.eclipse.org/legal/epl-v20.html
+ *
+ * SPDX-License-Identifier: EPL-2.0
+ *
+ * Copyright Contributors to the Zowe Project.
+ *
+ */
+
+.config-editor {
+    padding: 20px;
+    font-family: var(--vscode-font-family);
+    color: var(--vscode-foreground);
+    background-color: var(--vscode-editor-background);
+    height: 100vh;
+    overflow-y: auto;
+}
+
+.config-editor-header {
+    margin-bottom: 30px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    padding-bottom: 15px;
+}
+
+.config-editor-header h1 {
+    margin: 0 0 10px 0;
+    font-size: 24px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+.config-editor-description {
+    margin: 0;
+    color: var(--vscode-descriptionForeground);
+    font-size: 14px;
+}
+
+.config-section {
+    margin-bottom: 40px;
+}
+
+.config-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+}
+
+.config-section h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--vscode-foreground);
+}
+
+.add-row-btn {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-size: 13px;
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.add-row-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.add-row-btn .codicon {
+    font-size: 14px;
+}
+
+.delete-row-btn {
+    background-color: var(--vscode-button-secondaryBackground, #5a5a5a);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.delete-row-btn:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground, #6a6a6a);
+}
+
+.delete-row-btn .codicon {
+    font-size: 14px;
+}
+
+.config-editor-error,
+.config-editor-loading {
+    padding: 20px;
+    text-align: center;
+    color: var(--vscode-foreground);
+}
+
+.config-editor-error h2 {
+    color: var(--vscode-errorForeground);
+    margin-bottom: 10px;
+}
+
+.config-editor-error p {
+    color: var(--vscode-errorForeground);
+    font-family: var(--vscode-font-family);
+}
+
+/* AG Grid VS Code theme integration */
+.ag-theme-vsc {
+    --ag-foreground-color: var(--vscode-foreground);
+    --ag-background-color: var(--vscode-editor-background);
+    --ag-header-foreground-color: var(--vscode-foreground);
+    --ag-header-background-color: var(--vscode-sideBar-background);
+    --ag-odd-row-background-color: var(--vscode-editor-background);
+    --ag-header-column-resize-handle-color: var(--vscode-panel-border);
+    --ag-font-family: var(--vscode-font-family);
+    --ag-font-size: var(--vscode-font-size);
+    --ag-row-hover-color: var(--vscode-list-hoverBackground);
+    --ag-selected-row-background-color: var(--vscode-list-activeSelectionBackground);
+    --ag-range-selection-border-color: var(--vscode-focusBorder);
+    --ag-border-color: var(--vscode-panel-border);
+    --ag-cell-horizontal-border: solid var(--vscode-panel-border);
+}
+
+.ag-theme-quartz-dark.ag-theme-vsc {
+    --ag-foreground-color: var(--vscode-foreground);
+    --ag-background-color: var(--vscode-editor-background);
+    --ag-header-foreground-color: var(--vscode-foreground);
+    --ag-header-background-color: var(--vscode-sideBar-background);
+    --ag-odd-row-background-color: var(--vscode-editor-background);
+}
