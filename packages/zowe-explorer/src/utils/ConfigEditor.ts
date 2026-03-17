@@ -124,6 +124,9 @@ export class ConfigEditor extends WebView {
                 case "get-profile-status":
                     await this.sendProfileStatus(message.requestId);
                     break;
+                case "get-profile-schemas":
+                    await this.sendProfileSchemas(message.requestId);
+                    break;
                 case "update-config-data":
                     await this.updateConfigData(message.payload, message.requestId);
                     break;
@@ -229,11 +232,127 @@ export class ConfigEditor extends WebView {
     }
 
     /**
-     * Get login status for all profiles
+     * Parse schema properties from conditional if/then blocks in allOf array
+     * This method correctly extracts properties from the Zowe schema structure
+     */
+    private parseSchemaFromAllOf(schema: any): Record<string, string[]> {
+        const profileTypeSchemas: Record<string, string[]> = {};
+
+        try {
+            // Navigate to the profile pattern properties
+            if (!schema?.properties?.profiles?.patternProperties) {
+                return profileTypeSchemas;
+            }
+
+            const patternProps = schema.properties.profiles.patternProperties;
+
+            // Iterate through pattern properties (usually "^\\S*$")
+            for (const pattern of Object.keys(patternProps)) {
+                const profileDef = patternProps[pattern];
+
+                // Check if allOf array exists
+                if (!profileDef.allOf || !Array.isArray(profileDef.allOf)) {
+                    continue;
+                }
+
+                // Iterate through allOf conditions
+                for (const condition of profileDef.allOf) {
+                    // Look for if/then blocks
+                    if (condition.if && condition.then) {
+                        // Extract profile type from the if condition
+                        const profileType = condition.if?.properties?.type?.const;
+
+                        if (profileType && condition.then?.properties?.properties?.properties) {
+                            // Navigate to the actual properties: then.properties.properties.properties
+                            const actualProperties = condition.then.properties.properties.properties;
+                            const propertyNames = Object.keys(actualProperties);
+
+                            profileTypeSchemas[profileType] = propertyNames;
+
+                            ZoweLogger.trace(
+                                `[ConfigEditor] Extracted ${String(propertyNames.length)} properties for profile type '${String(
+                                    profileType
+                                )}': ${propertyNames.join(", ")}`
+                            );
+                        }
+                    }
+                }
+            }
+        } catch (error) {
+            ZoweLogger.error(`[ConfigEditor] Error parsing schema allOf blocks: ${String(error)}`);
+        }
+
+        return profileTypeSchemas;
+    }
+
+    /**
+     * Get schema properties for each profile type
+     */
+    private async getProfileTypeSchemas(): Promise<Record<string, string[]>> {
+        try {
+            let profileTypeSchemas: Record<string, string[]> = {};
+
+            // Try to read the schema file
+            if (this.configPath) {
+                const schemaPath = path.join(path.dirname(this.configPath), "zowe.schema.json");
+                try {
+                    const schemaContent = await fs.readFile(schemaPath, { encoding: "utf8" });
+                    const schema = JSON.parse(schemaContent);
+
+                    ZoweLogger.trace(`[ConfigEditor] Successfully loaded schema from: ${schemaPath}`);
+
+                    // Use the new parsing method
+                    profileTypeSchemas = this.parseSchemaFromAllOf(schema);
+                } catch (schemaError) {
+                    ZoweLogger.trace(`[ConfigEditor] Could not read schema file: ${String(schemaError)}`);
+                }
+            }
+
+            // Fallback: Define common properties for known profile types if schema parsing failed
+            if (Object.keys(profileTypeSchemas).length === 0) {
+                ZoweLogger.trace("[ConfigEditor] Using fallback property definitions");
+                profileTypeSchemas["zosmf"] = [
+                    "host",
+                    "port",
+                    "user",
+                    "password",
+                    "rejectUnauthorized",
+                    "basePath",
+                    "protocol",
+                    "encoding",
+                    "responseTimeout",
+                ];
+                profileTypeSchemas["rse"] = ["host", "port", "basePath", "protocol", "rejectUnauthorized"];
+                profileTypeSchemas["base"] = ["host", "port", "user", "password", "rejectUnauthorized"];
+                profileTypeSchemas["tso"] = ["account", "codePage", "logonProcedure", "characterSet", "rows", "columns"];
+                profileTypeSchemas["ssh"] = ["host", "port", "user", "password", "privateKey", "keyPassphrase", "handshakeTimeout"];
+                profileTypeSchemas["ftp"] = ["host", "port", "user", "password", "secureFtp"];
+                profileTypeSchemas["cics"] = ["host", "port", "user", "password", "regionName", "cicsPlex", "rejectUnauthorized", "protocol"];
+            }
+
+            return profileTypeSchemas;
+        } catch (error) {
+            ZoweLogger.error(`[ConfigEditor] Failed to get profile type schemas: ${String(error)}`);
+            // Return empty object if we can't get schemas
+            return {};
+        }
+    }
+
+    private async sendProfileSchemas(requestId: string): Promise<void> {
+        const schemas = await this.getProfileTypeSchemas();
+
+        await this.panel.webview.postMessage({
+            requestId,
+            payload: schemas,
+        });
+    }
+
+    /**
+     * Get authentication type for all profiles
      */
     private async sendProfileStatus(requestId: string): Promise<void> {
         try {
-            const profileStatus: Record<string, { loggedIn: boolean; hasToken: boolean }> = {};
+            const profileStatus: Record<string, { authType: string; loggedIn: boolean }> = {};
 
             if (this.configData?.profiles) {
                 const profilesCache = Profiles.getInstance();
@@ -243,31 +362,52 @@ export class ConfigEditor extends WebView {
                     try {
                         const profileData = this.configData.profiles[profileName];
                         const properties = profileData.properties || {};
+                        const secureFields = profileData.secure || [];
                         const teamConfig = profileInfo.getTeamConfig();
 
-                        // Check for basic auth credentials
-                        const hasBasicAuth = !!(properties.user && properties.password);
+                        let authType = "None";
+                        let loggedIn = false;
 
-                        // Check for token in properties
-                        const hasTokenInProps = !!properties.tokenValue;
+                        // Check for basic auth credentials (user/password)
+                        const hasUser = secureFields.includes("user") || !!properties.user;
+                        const hasPassword = secureFields.includes("password") || !!properties.password;
 
-                        // Check if token is stored securely
-                        const profPath = teamConfig.api.profiles.getProfilePathFromName(profileName);
-                        const hasSecureToken = teamConfig.api.secure.secureFields().includes(profPath + ".properties.tokenValue");
+                        if (hasUser && hasPassword) {
+                            authType = "Basic";
+                            loggedIn = true;
+                        }
 
-                        const hasToken = hasTokenInProps || hasSecureToken;
-                        const loggedIn = hasBasicAuth || hasToken;
+                        // Check for token-based auth
+                        const hasTokenValue = secureFields.includes("tokenValue") || !!properties.tokenValue;
+                        if (hasTokenValue) {
+                            // Check if it's stored securely
+                            const profPath = teamConfig.api.profiles.getProfilePathFromName(profileName);
+                            const isSecureToken = teamConfig.api.secure.secureFields().includes(profPath + ".properties.tokenValue");
+
+                            if (isSecureToken || properties.tokenValue) {
+                                authType = properties.tokenType || "Token";
+                                loggedIn = true;
+                            }
+                        }
+
+                        // Check for certificate auth
+                        const hasCertFile = secureFields.includes("certFile") || !!properties.certFile;
+                        const hasCertKeyFile = secureFields.includes("certKeyFile") || !!properties.certKeyFile;
+                        if (hasCertFile && hasCertKeyFile) {
+                            authType = "Certificate";
+                            loggedIn = true;
+                        }
 
                         profileStatus[profileName] = {
+                            authType: authType,
                             loggedIn: loggedIn,
-                            hasToken: hasToken,
                         };
                     } catch (error) {
-                        // Profile might not be loadable, mark as not logged in
+                        // Profile might not be loadable, mark as no auth
                         ZoweLogger.trace(`[ConfigEditor] Could not check status for profile ${profileName}: ${String(error)}`);
                         profileStatus[profileName] = {
+                            authType: "Unknown",
                             loggedIn: false,
-                            hasToken: false,
                         };
                     }
                 }

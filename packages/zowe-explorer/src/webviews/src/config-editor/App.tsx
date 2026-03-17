@@ -671,5 +671,3 @@ export function App() {
     </div>
   );
 }
-
-// Made with Bob
