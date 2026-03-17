@@ -55,6 +55,155 @@
     color: var(--vscode-foreground);
 }
 
+/* Table Styles */
+.table-container {
+    overflow-x: auto;
+    border: 1px solid var(--vscode-panel-border);
+    border-radius: 4px;
+}
+
+.config-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.config-table thead {
+    background-color: var(--vscode-sideBar-background);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.config-table th {
+    text-align: left;
+    padding: 10px 12px;
+    font-weight: 600;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    color: var(--vscode-foreground);
+}
+
+.config-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    vertical-align: middle;
+}
+
+/* Group Row Styles (Parent Rows) */
+.group-row {
+    background-color: var(--vscode-sideBar-background);
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s;
+}
+
+.group-row:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.group-cell {
+    padding: 10px 12px !important;
+    font-weight: 600;
+}
+
+.group-cell-content {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.group-cell-content .codicon {
+    font-size: 16px;
+    flex-shrink: 0;
+}
+
+.group-title {
+    font-size: 14px;
+    flex: 1;
+}
+
+.group-count {
+    color: var(--vscode-descriptionForeground);
+    font-size: 12px;
+    font-weight: normal;
+}
+
+/* Child Header Row Styles */
+.child-header-row {
+    background-color: var(--vscode-sideBar-background);
+}
+
+.child-header-row th {
+    text-align: left;
+    padding: 8px 12px;
+    font-weight: 600;
+    font-size: 12px;
+    border-bottom: 1px solid var(--vscode-panel-border);
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Child Row Styles (Individual Profile Rows) */
+.child-row {
+    background-color: var(--vscode-editor-background);
+}
+
+.child-row:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
+.child-row:last-child td {
+    border-bottom: none;
+}
+
+/* Indent cell for child rows */
+.indent-cell {
+    width: 30px;
+    background-color: var(--vscode-sideBar-background);
+    border-right: 2px solid var(--vscode-panel-border);
+}
+
+/* Column Styles */
+.group-column {
+    width: 200px;
+}
+
+.actions-column {
+    width: 80px;
+    text-align: center;
+}
+
+/* Editable Cell Styles */
+.editable-cell {
+    cursor: text;
+    min-height: 20px;
+    padding: 2px 4px;
+    border-radius: 2px;
+    transition: background-color 0.2s;
+}
+
+.editable-cell:hover {
+    background-color: var(--vscode-input-background);
+    outline: 1px solid var(--vscode-focusBorder);
+}
+
+.cell-input {
+    width: 100%;
+    padding: 4px 6px;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-focusBorder);
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+    outline: none;
+}
+
+.cell-input:focus {
+    border-color: var(--vscode-focusBorder);
+    box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+/* Button Styles */
 .add-row-btn {
     background-color: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
@@ -67,6 +216,7 @@
     display: flex;
     align-items: center;
     gap: 6px;
+    transition: background-color 0.2s;
 }
 
 .add-row-btn:hover {
@@ -74,6 +224,30 @@
 }
 
 .add-row-btn .codicon {
+    font-size: 14px;
+}
+
+.add-row-btn-inline {
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+    margin-left: auto;
+}
+
+.add-row-btn-inline:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.add-row-btn-inline .codicon {
     font-size: 14px;
 }
 
@@ -89,6 +263,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    transition: background-color 0.2s;
 }
 
 .delete-row-btn:hover {
@@ -99,6 +274,7 @@
     font-size: 14px;
 }
 
+/* Error and Loading States */
 .config-editor-error,
 .config-editor-loading {
     padding: 20px;
@@ -116,27 +292,34 @@
     font-family: var(--vscode-font-family);
 }
 
-/* AG Grid VS Code theme integration */
-.ag-theme-vsc {
-    --ag-foreground-color: var(--vscode-foreground);
-    --ag-background-color: var(--vscode-editor-background);
-    --ag-header-foreground-color: var(--vscode-foreground);
-    --ag-header-background-color: var(--vscode-sideBar-background);
-    --ag-odd-row-background-color: var(--vscode-editor-background);
-    --ag-header-column-resize-handle-color: var(--vscode-panel-border);
-    --ag-font-family: var(--vscode-font-family);
-    --ag-font-size: var(--vscode-font-size);
-    --ag-row-hover-color: var(--vscode-list-hoverBackground);
-    --ag-selected-row-background-color: var(--vscode-list-activeSelectionBackground);
-    --ag-range-selection-border-color: var(--vscode-focusBorder);
-    --ag-border-color: var(--vscode-panel-border);
-    --ag-cell-horizontal-border: solid var(--vscode-panel-border);
+/* Theme-specific adjustments */
+.theme-dark .child-row:nth-child(even) {
+    background-color: rgba(255, 255, 255, 0.02);
 }
 
-.ag-theme-quartz-dark.ag-theme-vsc {
-    --ag-foreground-color: var(--vscode-foreground);
-    --ag-background-color: var(--vscode-editor-background);
-    --ag-header-foreground-color: var(--vscode-foreground);
-    --ag-header-background-color: var(--vscode-sideBar-background);
-    --ag-odd-row-background-color: var(--vscode-editor-background);
+.theme-light .child-row:nth-child(even) {
+    background-color: rgba(0, 0, 0, 0.02);
 }
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .config-editor {
+        padding: 10px;
+    }
+
+    .config-section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .table-container {
+        overflow-x: scroll;
+    }
+
+    .config-table {
+        min-width: 600px;
+    }
+}
+
+/* Made with Bob */

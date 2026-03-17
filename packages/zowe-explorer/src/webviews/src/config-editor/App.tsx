@@ -9,24 +9,10 @@
  *
  */
 
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-quartz.css";
-import { AgGridReact } from "ag-grid-react";
-import { useEffect, useRef, useState } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { getVsCodeTheme, useMutableObserver } from "../utils";
 import { messageHandler } from "../MessageHandler";
 import "./style.css";
-import { ColDef, GridReadyEvent, CellValueChangedEvent } from "ag-grid-community";
-
-import { provideGlobalGridOptions } from "ag-grid-community";
-
-// Mark all grids as using legacy themes
-provideGlobalGridOptions({
-  theme: "legacy",
-});
-
-import { ModuleRegistry, AllCommunityModule } from "ag-grid-community";
-ModuleRegistry.registerModules([AllCommunityModule]);
 
 interface ConfigData {
   profiles?: Record<string, any>;
@@ -35,54 +21,81 @@ interface ConfigData {
   [key: string]: any;
 }
 
-interface TableSection {
-  title: string;
-  data: any[];
-  columns: ColDef[];
+interface Column {
+  field: string;
+  headerName: string;
+  editable: boolean;
 }
 
-// Status cell renderer
-const StatusCellRenderer = (props: any) => {
-  const isLoggedIn = props.value === "Logged In";
-  const icon = isLoggedIn ? "codicon-check-all" : "codicon-circle-slash";
-  const color = isLoggedIn ? "var(--vscode-testing-iconPassed)" : "var(--vscode-testing-iconFailed)";
+interface ProfileGroup {
+  type: string;
+  profiles: ProfileRow[];
+  columns: Column[];
+  expanded: boolean;
+}
+
+interface ProfileRow {
+  profileName: string;
+  type: string;
+  authType: string;
+  [key: string]: any;
+}
+
+interface SimpleRow {
+  [key: string]: any;
+}
+
+// Auth Type icon component
+const AuthTypeIcon = ({ authType }: { authType: string }) => {
+  let icon = "codicon-circle-slash";
+  let color = "var(--vscode-errorForeground)";
+
+  switch (authType) {
+    case "Basic":
+      icon = "codicon-key";
+      color = "var(--vscode-testing-iconPassed)";
+      break;
+    case "Token":
+    case "apimlAuthenticationToken":
+    case "bearer-token":
+      icon = "codicon-verified";
+      color = "var(--vscode-charts-blue)";
+      break;
+    case "Certificate":
+      icon = "codicon-file-certificate";
+      color = "var(--vscode-charts-green)";
+      break;
+    case "None":
+    case "Unknown":
+      icon = "codicon-circle-slash";
+      color = "var(--vscode-errorForeground)";
+      break;
+    default:
+      icon = "codicon-question";
+      color = "var(--vscode-charts-yellow)";
+  }
 
   return (
     <span>
       <span className={`codicon ${icon}`} style={{ color, marginRight: "6px" }}></span>
-      {props.value}
+      {authType}
     </span>
   );
 };
 
-// Delete button cell renderer
-const DeleteButtonRenderer = (props: any) => {
-  const handleClick = () => {
-    const sectionTitle = props.context.sectionTitle;
-    const rowIndex = props.node.rowIndex;
-    props.context.handleDeleteRow(sectionTitle, rowIndex);
-  };
-
-  return (
-    <button className="delete-row-btn" onClick={handleClick}>
-      <span className="codicon codicon-trash"></span>
-    </button>
-  );
-};
-
 export function App() {
-  const [theme, setTheme] = useState<string>("ag-theme-quartz");
+  const [theme, setTheme] = useState<string>("light");
   const [configData, setConfigData] = useState<ConfigData | null>(null);
-  const [tableSections, setTableSections] = useState<TableSection[]>([]);
+  const [profileGroups, setProfileGroups] = useState<ProfileGroup[]>([]);
+  const [defaultsData, setDefaultsData] = useState<SimpleRow[]>([]);
+  const [otherData, setOtherData] = useState<SimpleRow[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const gridRefs = useRef<{ [key: string]: AgGridReact }>({});
+  const [editingCell, setEditingCell] = useState<{ section: string; groupIndex?: number; rowIndex: number; field: string } | null>(null);
 
   useEffect(() => {
-    // Apply the dark version of the AG Grid theme if the user is using a dark or high-contrast theme in VS Code.
+    // Apply theme
     const userTheme = getVsCodeTheme();
-    if (userTheme !== "vscode-light") {
-      setTheme("ag-theme-quartz-dark");
-    }
+    setTheme(userTheme === "vscode-light" ? "light" : "dark");
 
     // Request config data from extension
     const loadConfigData = async () => {
@@ -90,10 +103,13 @@ export function App() {
         const data = await messageHandler.request<ConfigData>("get-config-data");
         setConfigData(data);
 
-        // Also request profile status
-        const status = await messageHandler.request<Record<string, { loggedIn: boolean; hasToken: boolean }>>("get-profile-status");
+        // Request profile auth type
+        const status = await messageHandler.request<Record<string, { authType: string; loggedIn: boolean }>>("get-profile-status");
 
-        processConfigData(data, status);
+        // Request profile schemas
+        const schemas = await messageHandler.request<Record<string, string[]>>("get-profile-schemas");
+
+        processConfigData(data, status, schemas);
       } catch (err) {
         setError(`Failed to load config data: ${err}`);
       }
@@ -108,27 +124,36 @@ export function App() {
     document.body,
     (_mutations, _observer) => {
       const themeAttr = getVsCodeTheme();
-      setTheme(themeAttr === "vscode-light" ? "ag-theme-quartz" : "ag-theme-quartz-dark");
+      setTheme(themeAttr === "vscode-light" ? "light" : "dark");
     },
     { attributes: true }
   );
 
-  const processConfigData = (data: ConfigData, status?: Record<string, { loggedIn: boolean; hasToken: boolean }>) => {
-    const sections: TableSection[] = [];
+  const processConfigData = (
+    data: ConfigData,
+    status?: Record<string, { authType: string; loggedIn: boolean }>,
+    schemas?: Record<string, string[]>
+  ) => {
+    console.log("processConfigData called", {
+      hasProfiles: !!data.profiles,
+      profileCount: data.profiles ? Object.keys(data.profiles).length : 0,
+      schemas,
+    });
 
-    // Process profiles
+    // Process profiles - group by type
     if (data.profiles) {
-      const profilesData: any[] = [];
+      const profilesByType: Record<string, ProfileRow[]> = {};
+
       Object.entries(data.profiles).forEach(([profileName, profileConfig]) => {
         if (typeof profileConfig === "object" && profileConfig !== null) {
-          const flatProfile: any = { profileName, type: profileConfig.type || "" };
+          const profileType = profileConfig.type || "unknown";
+          console.log(`Processing profile: ${profileName}, type: ${profileType}`, profileConfig);
 
-          // Add login status
-          if (status && status[profileName]) {
-            flatProfile.status = status[profileName].loggedIn ? "Logged In" : "Not Logged In";
-          } else {
-            flatProfile.status = "Unknown";
-          }
+          const flatProfile: ProfileRow = {
+            profileName,
+            type: profileType,
+            authType: status?.[profileName]?.authType || "Unknown",
+          };
 
           // Flatten properties
           if (profileConfig.properties) {
@@ -137,206 +162,221 @@ export function App() {
             });
           }
 
-          profilesData.push(flatProfile);
+          // Group by type
+          if (!profilesByType[profileType]) {
+            profilesByType[profileType] = [];
+          }
+          profilesByType[profileType].push(flatProfile);
         }
       });
 
-      if (profilesData.length > 0) {
-        // Dynamically create columns based on all keys found
+      console.log("profilesByType:", profilesByType);
+
+      // Create profile groups with columns
+      const groups: ProfileGroup[] = Object.entries(profilesByType).map(([profileType, profiles]) => {
+        // Get allowed properties for this profile type from schema
+        const allowedProperties = schemas?.[profileType] || null;
+        console.log(`Creating group for ${profileType}, allowedProperties:`, allowedProperties);
+
+        // Dynamically create columns based on all keys found in this type
         const allKeys = new Set<string>();
-        profilesData.forEach((profile) => {
-          Object.keys(profile).forEach((key) => allKeys.add(key));
+        profiles.forEach((profile) => {
+          Object.keys(profile).forEach((key) => {
+            // Always include core fields
+            if (key === "profileName" || key === "type" || key === "authType") {
+              allKeys.add(key);
+            }
+            // If we have a schema, only include allowed properties
+            else if (!allowedProperties || allowedProperties.includes(key)) {
+              allKeys.add(key);
+            }
+          });
         });
 
-        const profileColumns: ColDef[] = [
-          // Type column for grouping
-          {
-            field: "type",
-            headerName: "Type",
-            editable: false,
-            sortable: false,
-            filter: false,
-            resizable: true,
-            flex: 1,
-            rowGroup: true,
-            hide: true,
-          },
-          // Status column first (with icon)
-          {
-            field: "status",
-            headerName: "Status",
-            editable: false,
-            sortable: false,
-            filter: false,
-            resizable: true,
-            flex: 1,
-            cellRenderer: StatusCellRenderer,
-          },
+        console.log(`Keys for ${profileType}:`, Array.from(allKeys));
+
+        const columns: Column[] = [
+          { field: "authType", headerName: "Auth Type", editable: false },
           ...Array.from(allKeys)
-            .filter((key) => key !== "status" && key !== "type")
+            .filter((key) => key !== "authType" && key !== "type")
             .map((key) => ({
               field: key,
               headerName: key.charAt(0).toUpperCase() + key.slice(1),
-              editable: key !== "profileName", // Profile name should not be editable
-              sortable: false,
-              filter: false,
-              resizable: true,
-              flex: 1,
+              editable: key !== "profileName",
             })),
-          {
-            field: "actions",
-            headerName: "Actions",
-            cellRenderer: DeleteButtonRenderer,
-            editable: false,
-            sortable: false,
-            filter: false,
-            width: 80,
-            suppressSizeToFit: true,
-          },
         ];
 
-        sections.push({
-          title: "Profiles",
-          data: profilesData,
-          columns: profileColumns,
-        });
-      }
+        return {
+          type: profileType,
+          profiles,
+          columns,
+          expanded: false, // Start collapsed
+        };
+      });
+
+      console.log("Created groups:", groups);
+      setProfileGroups(groups);
     }
 
     // Process defaults
     if (data.defaults) {
-      const defaultsData = Object.entries(data.defaults).map(([key, value]) => ({
+      const defaults = Object.entries(data.defaults).map(([key, value]) => ({
         setting: key,
         value: typeof value === "object" ? JSON.stringify(value) : String(value),
       }));
-
-      sections.push({
-        title: "Defaults",
-        data: defaultsData,
-        columns: [
-          { field: "setting", headerName: "Setting", editable: true, sortable: false, filter: false, resizable: true, flex: 1 },
-          { field: "value", headerName: "Value", editable: true, sortable: false, filter: false, resizable: true, flex: 1 },
-          {
-            field: "actions",
-            headerName: "Actions",
-            cellRenderer: DeleteButtonRenderer,
-            editable: false,
-            sortable: false,
-            filter: false,
-            width: 80,
-            suppressSizeToFit: true,
-          },
-        ],
-      });
+      setDefaultsData(defaults);
     }
 
     // Process other top-level properties
     const otherProps = Object.entries(data).filter(([key]) => key !== "profiles" && key !== "defaults" && key !== "$schema");
 
     if (otherProps.length > 0) {
-      const otherData = otherProps.map(([key, value]) => ({
+      const other = otherProps.map(([key, value]) => ({
         property: key,
         value: typeof value === "object" ? JSON.stringify(value) : String(value),
       }));
-
-      sections.push({
-        title: "Other Settings",
-        data: otherData,
-        columns: [
-          { field: "property", headerName: "Property", editable: true, sortable: false, filter: false, resizable: true, flex: 1 },
-          { field: "value", headerName: "Value", editable: true, sortable: false, filter: false, resizable: true, flex: 1 },
-          {
-            field: "actions",
-            headerName: "Actions",
-            cellRenderer: DeleteButtonRenderer,
-            editable: false,
-            sortable: false,
-            filter: false,
-            width: 80,
-            suppressSizeToFit: true,
-          },
-        ],
-      });
+      setOtherData(other);
     }
-
-    setTableSections(sections);
   };
 
-  const onCellValueChanged = async (event: CellValueChangedEvent, sectionTitle: string) => {
-    // Send update to extension
+  const toggleGroup = (groupIndex: number) => {
+    setProfileGroups((prev) => prev.map((group, idx) => (idx === groupIndex ? { ...group, expanded: !group.expanded } : group)));
+  };
+
+  const handleCellEdit = async (section: string, groupIndex: number | undefined, rowIndex: number, field: string, newValue: string) => {
     try {
+      let rowData: any;
+      let sectionTitle: string;
+
+      if (section === "profiles" && groupIndex !== undefined) {
+        rowData = profileGroups[groupIndex].profiles[rowIndex];
+        sectionTitle = `Profiles: ${profileGroups[groupIndex].type.toUpperCase()}`;
+      } else if (section === "defaults") {
+        rowData = defaultsData[rowIndex];
+        sectionTitle = "Defaults";
+      } else {
+        rowData = otherData[rowIndex];
+        sectionTitle = "Other Settings";
+      }
+
+      const oldValue = rowData[field];
+
       await messageHandler.request("update-config-data", {
         section: sectionTitle,
-        rowData: event.data,
-        field: event.colDef.field,
-        oldValue: event.oldValue,
-        newValue: event.newValue,
+        rowData,
+        field,
+        oldValue,
+        newValue,
       });
+
+      // Update local state
+      if (section === "profiles" && groupIndex !== undefined) {
+        setProfileGroups((prev) =>
+          prev.map((group, idx) =>
+            idx === groupIndex
+              ? {
+                  ...group,
+                  profiles: group.profiles.map((profile, pIdx) => (pIdx === rowIndex ? { ...profile, [field]: newValue } : profile)),
+                }
+              : group
+          )
+        );
+      } else if (section === "defaults") {
+        setDefaultsData((prev) => prev.map((row, idx) => (idx === rowIndex ? { ...row, [field]: newValue } : row)));
+      } else {
+        setOtherData((prev) => prev.map((row, idx) => (idx === rowIndex ? { ...row, [field]: newValue } : row)));
+      }
+
+      setEditingCell(null);
     } catch (err) {
       setError(`Failed to update config: ${err}`);
-      // Revert the change
-      event.node.setDataValue(event.colDef.field!, event.oldValue);
     }
   };
 
-  const onGridReady = (event: GridReadyEvent) => {
-    // Auto-size columns to fit content
-    event.api.sizeColumnsToFit();
-  };
-
-  const handleAddRow = (sectionTitle: string) => {
-    const section = tableSections.find((s) => s.title === sectionTitle);
-    if (!section) return;
-
-    let newRow: any = {};
-
-    // Create empty row based on section type
-    if (sectionTitle === "Profiles") {
-      newRow = { profileName: "new_profile", type: "zosmf" };
-    } else if (sectionTitle === "Defaults") {
-      newRow = { setting: "new_setting", value: "" };
-    } else if (sectionTitle === "Other Settings") {
-      newRow = { property: "new_property", value: "" };
-    }
-
-    // Add row to grid
-    const gridRef = gridRefs.current[sectionTitle];
-    if (gridRef?.api) {
-      gridRef.api.applyTransaction({ add: [newRow] });
-
-      // Send to backend to update config
-      messageHandler
-        .request("add-config-row", {
-          section: sectionTitle,
-          rowData: newRow,
-        })
-        .catch((err) => {
-          setError(`Failed to add row: ${err}`);
-          // Revert the add
-          gridRef.api.applyTransaction({ remove: [newRow] });
-        });
-    }
-  };
-
-  const handleDeleteRow = async (sectionTitle: string, rowIndex: number) => {
-    const gridRef = gridRefs.current[sectionTitle];
-    if (!gridRef?.api) return;
-
-    const rowNode = gridRef.api.getDisplayedRowAtIndex(rowIndex);
-    if (!rowNode) return;
-
-    const rowData = rowNode.data;
-
+  const handleDeleteRow = async (section: string, groupIndex: number | undefined, rowIndex: number) => {
     try {
+      let rowData: any;
+      let sectionTitle: string;
+
+      if (section === "profiles" && groupIndex !== undefined) {
+        rowData = profileGroups[groupIndex].profiles[rowIndex];
+        sectionTitle = `Profiles: ${profileGroups[groupIndex].type.toUpperCase()}`;
+      } else if (section === "defaults") {
+        rowData = defaultsData[rowIndex];
+        sectionTitle = "Defaults";
+      } else {
+        rowData = otherData[rowIndex];
+        sectionTitle = "Other Settings";
+      }
+
       await messageHandler.request("delete-config-row", {
         section: sectionTitle,
         rowData,
       });
 
-      // Remove from grid
-      gridRef.api.applyTransaction({ remove: [rowData] });
+      // Update local state
+      if (section === "profiles" && groupIndex !== undefined) {
+        setProfileGroups((prev) =>
+          prev.map((group, idx) =>
+            idx === groupIndex
+              ? {
+                  ...group,
+                  profiles: group.profiles.filter((_, pIdx) => pIdx !== rowIndex),
+                }
+              : group
+          )
+        );
+      } else if (section === "defaults") {
+        setDefaultsData((prev) => prev.filter((_, idx) => idx !== rowIndex));
+      } else {
+        setOtherData((prev) => prev.filter((_, idx) => idx !== rowIndex));
+      }
     } catch (err) {
       setError(`Failed to delete row: ${err}`);
+    }
+  };
+
+  const handleAddRow = async (section: string, groupIndex?: number) => {
+    try {
+      let newRow: any;
+      let sectionTitle: string;
+
+      if (section === "profiles" && groupIndex !== undefined) {
+        const profileType = profileGroups[groupIndex].type;
+        newRow = { profileName: "new_profile", type: profileType };
+        sectionTitle = `Profiles: ${profileType.toUpperCase()}`;
+      } else if (section === "defaults") {
+        newRow = { setting: "new_setting", value: "" };
+        sectionTitle = "Defaults";
+      } else {
+        newRow = { property: "new_property", value: "" };
+        sectionTitle = "Other Settings";
+      }
+
+      await messageHandler.request("add-config-row", {
+        section: sectionTitle,
+        rowData: newRow,
+      });
+
+      // Update local state
+      if (section === "profiles" && groupIndex !== undefined) {
+        setProfileGroups((prev) =>
+          prev.map((group, idx) =>
+            idx === groupIndex
+              ? {
+                  ...group,
+                  profiles: [...group.profiles, { ...newRow, authType: "None" }],
+                }
+              : group
+          )
+        );
+      } else if (section === "defaults") {
+        setDefaultsData((prev) => [...prev, newRow]);
+      } else {
+        setOtherData((prev) => [...prev, newRow]);
+      }
+    } catch (err) {
+      setError(`Failed to add row: ${err}`);
     }
   };
 
@@ -358,53 +398,278 @@ export function App() {
   }
 
   return (
-    <div className={`config-editor ${theme}`}>
+    <div className={`config-editor theme-${theme}`}>
       <div className="config-editor-header">
         <h1>Zowe Configuration Editor</h1>
         <p className="config-editor-description">Edit your Zowe configuration settings. Changes are saved automatically.</p>
       </div>
 
-      {tableSections.map((section, index) => (
-        <div key={index} className="config-section">
+      {/* Debug Info */}
+      <div className="config-section">
+        <p>Profile Groups Count: {profileGroups.length}</p>
+        <p>Config Data: {configData ? "Loaded" : "Not Loaded"}</p>
+        {configData?.profiles && <p>Profiles in config: {Object.keys(configData.profiles).length}</p>}
+      </div>
+
+      {/* Profiles Section with Accordion-style Grouping */}
+      {profileGroups.length > 0 ? (
+        <div className="config-section">
           <div className="config-section-header">
-            <h2>{section.title}</h2>
-            <button className="add-row-btn" onClick={() => handleAddRow(section.title)}>
+            <h2>Profiles</h2>
+          </div>
+
+          <div className="table-container">
+            <table className="config-table">
+              <tbody>
+                {profileGroups.map((group, groupIndex) => (
+                  <>
+                    {/* Parent Row - Profile Type Group */}
+                    <tr key={`group-${groupIndex}`} className="group-row" onClick={() => toggleGroup(groupIndex)}>
+                      <td className="group-cell" colSpan={100}>
+                        <div className="group-cell-content">
+                          <span className={`codicon ${group.expanded ? "codicon-chevron-down" : "codicon-chevron-right"}`}></span>
+                          <span className="group-title">{group.type.toUpperCase()}</span>
+                          <span className="group-count">({group.profiles.length})</span>
+                          <button
+                            className="add-row-btn-inline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddRow("profiles", groupIndex);
+                            }}
+                          >
+                            <span className="codicon codicon-add"></span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {/* Child Rows - Header and Individual Profiles */}
+                    {group.expanded && (
+                      <>
+                        {/* Column Headers for this group */}
+                        <tr key={`header-${groupIndex}`} className="child-header-row">
+                          <th className="indent-cell"></th>
+                          {group.columns.map((col) => (
+                            <th key={col.field}>{col.headerName}</th>
+                          ))}
+                          <th className="actions-column">Actions</th>
+                        </tr>
+
+                        {/* Profile Rows */}
+                        {group.profiles.map((profile, rowIndex) => (
+                          <tr key={`profile-${groupIndex}-${rowIndex}`} className="child-row">
+                            <td className="indent-cell"></td>
+                            {group.columns.map((col) => (
+                              <td key={col.field}>
+                                {col.field === "authType" ? (
+                                  <AuthTypeIcon authType={profile[col.field] || "None"} />
+                                ) : col.editable &&
+                                  editingCell?.section === "profiles" &&
+                                  editingCell?.groupIndex === groupIndex &&
+                                  editingCell?.rowIndex === rowIndex &&
+                                  editingCell?.field === col.field ? (
+                                  <input
+                                    type="text"
+                                    className="cell-input"
+                                    defaultValue={profile[col.field] || ""}
+                                    autoFocus
+                                    onBlur={(e) => handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter") {
+                                        handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value);
+                                      } else if (e.key === "Escape") {
+                                        setEditingCell(null);
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div
+                                    className={col.editable ? "editable-cell" : ""}
+                                    onClick={() => col.editable && setEditingCell({ section: "profiles", groupIndex, rowIndex, field: col.field })}
+                                  >
+                                    {profile[col.field] !== undefined ? String(profile[col.field]) : ""}
+                                  </div>
+                                )}
+                              </td>
+                            ))}
+                            <td className="actions-column">
+                              <button className="delete-row-btn" onClick={() => handleDeleteRow("profiles", groupIndex, rowIndex)}>
+                                <span className="codicon codicon-trash"></span>
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </>
+                    )}
+                  </>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : (
+        <div className="config-section">
+          <p>No profile groups found</p>
+        </div>
+      )}
+
+      {/* Defaults Section */}
+      {defaultsData.length > 0 && (
+        <div className="config-section">
+          <div className="config-section-header">
+            <h2>Defaults</h2>
+            <button className="add-row-btn" onClick={() => handleAddRow("defaults")}>
               <span className="codicon codicon-add"></span> Add Row
             </button>
           </div>
-          <div className={`${theme} ag-theme-vsc`} style={{ height: "400px", width: "100%" }}>
-            <AgGridReact
-              ref={(ref) => {
-                if (ref) gridRefs.current[section.title] = ref;
-              }}
-              rowData={section.data}
-              columnDefs={section.columns}
-              defaultColDef={{
-                flex: 1,
-                minWidth: 100,
-              }}
-              autoGroupColumnDef={{
-                headerName: "Profile Type",
-                minWidth: 200,
-                cellRendererParams: {
-                  suppressCount: true,
-                },
-              }}
-              groupDefaultExpanded={-1}
-              context={{
-                sectionTitle: section.title,
-                handleDeleteRow: handleDeleteRow,
-              }}
-              onCellValueChanged={(event) => onCellValueChanged(event, section.title)}
-              onGridReady={(event) => onGridReady(event)}
-              domLayout="normal"
-              pagination={section.data.length > 10}
-              paginationPageSize={10}
-              suppressCellFocus={false}
-            />
+          <div className="table-container">
+            <table className="config-table">
+              <thead>
+                <tr>
+                  <th>Setting</th>
+                  <th>Value</th>
+                  <th className="actions-column">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {defaultsData.map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    <td>
+                      {editingCell?.section === "defaults" && editingCell?.rowIndex === rowIndex && editingCell?.field === "setting" ? (
+                        <input
+                          type="text"
+                          className="cell-input"
+                          defaultValue={row.setting}
+                          autoFocus
+                          onBlur={(e) => handleCellEdit("defaults", undefined, rowIndex, "setting", e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleCellEdit("defaults", undefined, rowIndex, "setting", e.currentTarget.value);
+                            } else if (e.key === "Escape") {
+                              setEditingCell(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="editable-cell" onClick={() => setEditingCell({ section: "defaults", rowIndex, field: "setting" })}>
+                          {row.setting}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {editingCell?.section === "defaults" && editingCell?.rowIndex === rowIndex && editingCell?.field === "value" ? (
+                        <input
+                          type="text"
+                          className="cell-input"
+                          defaultValue={row.value}
+                          autoFocus
+                          onBlur={(e) => handleCellEdit("defaults", undefined, rowIndex, "value", e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleCellEdit("defaults", undefined, rowIndex, "value", e.currentTarget.value);
+                            } else if (e.key === "Escape") {
+                              setEditingCell(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="editable-cell" onClick={() => setEditingCell({ section: "defaults", rowIndex, field: "value" })}>
+                          {row.value}
+                        </div>
+                      )}
+                    </td>
+                    <td className="actions-column">
+                      <button className="delete-row-btn" onClick={() => handleDeleteRow("defaults", undefined, rowIndex)}>
+                        <span className="codicon codicon-trash"></span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         </div>
-      ))}
+      )}
+
+      {/* Other Settings Section */}
+      {otherData.length > 0 && (
+        <div className="config-section">
+          <div className="config-section-header">
+            <h2>Other Settings</h2>
+            <button className="add-row-btn" onClick={() => handleAddRow("other")}>
+              <span className="codicon codicon-add"></span> Add Row
+            </button>
+          </div>
+          <div className="table-container">
+            <table className="config-table">
+              <thead>
+                <tr>
+                  <th>Property</th>
+                  <th>Value</th>
+                  <th className="actions-column">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {otherData.map((row, rowIndex) => (
+                  <tr key={rowIndex}>
+                    <td>
+                      {editingCell?.section === "other" && editingCell?.rowIndex === rowIndex && editingCell?.field === "property" ? (
+                        <input
+                          type="text"
+                          className="cell-input"
+                          defaultValue={row.property}
+                          autoFocus
+                          onBlur={(e) => handleCellEdit("other", undefined, rowIndex, "property", e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleCellEdit("other", undefined, rowIndex, "property", e.currentTarget.value);
+                            } else if (e.key === "Escape") {
+                              setEditingCell(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="editable-cell" onClick={() => setEditingCell({ section: "other", rowIndex, field: "property" })}>
+                          {row.property}
+                        </div>
+                      )}
+                    </td>
+                    <td>
+                      {editingCell?.section === "other" && editingCell?.rowIndex === rowIndex && editingCell?.field === "value" ? (
+                        <input
+                          type="text"
+                          className="cell-input"
+                          defaultValue={row.value}
+                          autoFocus
+                          onBlur={(e) => handleCellEdit("other", undefined, rowIndex, "value", e.currentTarget.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleCellEdit("other", undefined, rowIndex, "value", e.currentTarget.value);
+                            } else if (e.key === "Escape") {
+                              setEditingCell(null);
+                            }
+                          }}
+                        />
+                      ) : (
+                        <div className="editable-cell" onClick={() => setEditingCell({ section: "other", rowIndex, field: "value" })}>
+                          {row.value}
+                        </div>
+                      )}
+                    </td>
+                    <td className="actions-column">
+                      <button className="delete-row-btn" onClick={() => handleDeleteRow("other", undefined, rowIndex)}>
+                        <span className="codicon codicon-trash"></span>
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
+
+// Made with Bob
