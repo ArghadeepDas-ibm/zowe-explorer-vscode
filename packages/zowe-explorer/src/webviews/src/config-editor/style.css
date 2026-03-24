@@ -57,15 +57,18 @@
 
 /* Table Styles */
 .table-container {
-    overflow-x: auto;
+    overflow-x: auto; /* Enable horizontal scrolling */
     border: 1px solid var(--vscode-panel-border);
     border-radius: 4px;
+    max-width: 100%;
 }
 
 .config-table {
-    width: 100%;
+    width: max-content; /* Table expands to fit all columns */
+    min-width: 100%; /* Ensure table takes at least full container width */
     border-collapse: collapse;
     font-size: 13px;
+    table-layout: auto; /* Auto layout sizes columns based on content */
 }
 
 .config-table thead {
@@ -81,12 +84,41 @@
     font-weight: 600;
     border-bottom: 1px solid var(--vscode-panel-border);
     color: var(--vscode-foreground);
+    position: relative;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    user-select: none;
+}
+
+/* Resize handle for columns */
+.config-table th .resize-handle {
+    position: absolute;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    width: 8px;
+    cursor: col-resize;
+    z-index: 1;
+    background-color: transparent;
+    transition: background-color 0.2s;
+}
+
+.config-table th .resize-handle:hover {
+    background-color: var(--vscode-focusBorder);
+}
+
+.config-table th .resize-handle.resizing {
+    background-color: var(--vscode-focusBorder);
 }
 
 .config-table td {
     padding: 8px 12px;
     border-bottom: 1px solid var(--vscode-panel-border);
     vertical-align: middle;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Group Row Styles (Parent Rows) */
@@ -140,6 +172,23 @@
     font-size: 12px;
     border-bottom: 1px solid var(--vscode-panel-border);
     color: var(--vscode-descriptionForeground);
+    width: 150px; /* Default width for flexible columns */
+    min-width: 80px;
+}
+
+/* Set specific widths for fixed columns */
+.child-header-row th.indent-cell,
+.indent-cell {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+}
+
+.child-header-row th.actions-column,
+.actions-column {
+    width: 80px !important;
+    min-width: 80px !important;
+    max-width: 80px !important;
 }
 
 /* Child Row Styles (Individual Profile Rows) */
@@ -168,8 +217,18 @@
 }
 
 .actions-column {
-    width: 80px;
+    width: 100px !important;
+    min-width: 100px !important;
+    max-width: 100px !important;
     text-align: center;
+    resize: none; /* Prevent resizing actions column */
+}
+
+.indent-cell {
+    width: 30px !important;
+    min-width: 30px !important;
+    max-width: 30px !important;
+    resize: none; /* Prevent resizing indent column */
 }
 
 /* Editable Cell Styles */
@@ -186,7 +245,8 @@
     outline: 1px solid var(--vscode-focusBorder);
 }
 
-.cell-input {
+.cell-input,
+.cell-select {
     width: 100%;
     padding: 4px 6px;
     background-color: var(--vscode-input-background);
@@ -198,9 +258,14 @@
     outline: none;
 }
 
-.cell-input:focus {
+.cell-input:focus,
+.cell-select:focus {
     border-color: var(--vscode-focusBorder);
     box-shadow: 0 0 0 1px var(--vscode-focusBorder);
+}
+
+.cell-select {
+    cursor: pointer;
 }
 
 /* Button Styles */
@@ -274,6 +339,48 @@
     font-size: 14px;
 }
 
+.edit-row-btn {
+    background-color: var(--vscode-button-secondaryBackground, #5a5a5a);
+    color: var(--vscode-button-secondaryForeground, #ffffff);
+    border: none;
+    padding: 4px 8px;
+    cursor: pointer;
+    font-size: 12px;
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background-color 0.2s;
+}
+
+.edit-row-btn:hover {
+    background-color: var(--vscode-button-secondaryHoverBackground, #6a6a6a);
+}
+
+.edit-row-btn .codicon {
+    font-size: 14px;
+}
+
+/* Non-editable cell (for defaults setting column) */
+.non-editable-cell {
+    padding: 2px 4px;
+    color: var(--vscode-descriptionForeground);
+}
+
+/* Nested profile styling */
+.nested-profile {
+    background-color: var(--vscode-editor-background);
+}
+
+.nested-profile td {
+    padding-left: 20px;
+}
+
+.nested-profile:hover {
+    background-color: var(--vscode-list-hoverBackground);
+}
+
 /* Error and Loading States */
 .config-editor-error,
 .config-editor-loading {
@@ -320,4 +427,97 @@
     .config-table {
         min-width: 600px;
     }
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .config-editor {
+        padding: 10px;
+    }
+
+    .config-section-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .table-container {
+        overflow-x: scroll;
+    }
+
+    .config-table {
+        min-width: 600px;
+    }
+}
+
+/* New Profile Type Input Row Styles */
+.new-profile-type-row {
+    background-color: var(--vscode-editor-inactiveSelectionBackground);
+    border: 2px solid var(--vscode-focusBorder);
+}
+
+.new-profile-type-row .group-cell-content {
+    gap: 10px;
+}
+
+.profile-type-input {
+    flex: 1;
+    padding: 6px 10px;
+    background-color: var(--vscode-input-background);
+    color: var(--vscode-input-foreground);
+    border: 1px solid var(--vscode-input-border);
+    border-radius: 2px;
+    font-family: var(--vscode-font-family);
+    font-size: 13px;
+    outline: none;
+}
+
+.profile-type-input:focus {
+    border-color: var(--vscode-focusBorder);
+}
+
+.profile-type-input::placeholder {
+    color: var(--vscode-input-placeholderForeground);
+}
+
+.icon-btn {
+    padding: 4px 8px;
+    background-color: transparent;
+    border: 1px solid var(--vscode-button-border);
+    color: var(--vscode-button-foreground);
+    cursor: pointer;
+    border-radius: 2px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.icon-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.icon-btn .codicon {
+    font-size: 14px;
+}
+
+/* Save Button Styles */
+.save-row-btn {
+    padding: 4px 8px;
+    background-color: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border: none;
+    border-radius: 2px;
+    cursor: pointer;
+    margin-right: 8px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.save-row-btn:hover {
+    background-color: var(--vscode-button-hoverBackground);
+}
+
+.save-row-btn .codicon {
+    font-size: 14px;
 }

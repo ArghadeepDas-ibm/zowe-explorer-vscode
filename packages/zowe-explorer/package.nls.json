@@ -156,6 +156,7 @@
   "zowe.openRecentMember": "Open Recent Member",
   "zowe.displayReleaseNotes": "Display Release Notes",
   "zowe.editZoweConfig": "Edit Zowe Config",
+  "zowe.openConfigEditorWebview": "Open Config Editor (Webview)",
   "issueTsoCmd": "Issue TSO Command",
   "deleteProfile": "Delete a Profile Permanently...",
   "renameDataSet": "Rename Data Set",

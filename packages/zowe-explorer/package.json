@@ -792,6 +792,11 @@
         "command": "zowe.editZoweConfig",
         "title": "%zowe.editZoweConfig%",
         "category": "Zowe Explorer"
+      },
+      {
+        "command": "zowe.openConfigEditorWebview",
+        "title": "%zowe.openConfigEditorWebview%",
+        "category": "Zowe Explorer"
       }
     ],
     "menus": {
@@ -805,6 +810,11 @@
           "when": "editorHasSelection && editorFocus",
           "command": "zowe.ds.zoom",
           "group": "000_zowe_dsMainframeInteraction@2"
+        },
+        {
+          "when": "resourceFilename =~ /zowe\\.config\\.json$/",
+          "command": "zowe.openConfigEditorWebview",
+          "group": "zowe_config@1"
         }
       ],
       "explorer/context": [
@@ -856,6 +866,51 @@
           "when": "view == zowe.jobs.explorer",
           "command": "zowe.jobs.addJobsSession",
           "group": "navigation"
+        },
+        {
+          "when": "view == zowe.ds.explorer",
+          "command": "zowe.all.config.init",
+          "group": "zowe_config@1"
+        },
+        {
+          "when": "view == zowe.ds.explorer",
+          "command": "zowe.editZoweConfig",
+          "group": "zowe_config@2"
+        },
+        {
+          "when": "view == zowe.ds.explorer",
+          "command": "zowe.openConfigEditorWebview",
+          "group": "zowe_config@3"
+        },
+        {
+          "when": "view == zowe.uss.explorer",
+          "command": "zowe.all.config.init",
+          "group": "zowe_config@1"
+        },
+        {
+          "when": "view == zowe.uss.explorer",
+          "command": "zowe.editZoweConfig",
+          "group": "zowe_config@2"
+        },
+        {
+          "when": "view == zowe.uss.explorer",
+          "command": "zowe.openConfigEditorWebview",
+          "group": "zowe_config@3"
+        },
+        {
+          "when": "view == zowe.jobs.explorer",
+          "command": "zowe.all.config.init",
+          "group": "zowe_config@1"
+        },
+        {
+          "when": "view == zowe.jobs.explorer",
+          "command": "zowe.editZoweConfig",
+          "group": "zowe_config@2"
+        },
+        {
+          "when": "view == zowe.jobs.explorer",
+          "command": "zowe.openConfigEditorWebview",
+          "group": "zowe_config@3"
         }
       ],
       "view/item/context": [

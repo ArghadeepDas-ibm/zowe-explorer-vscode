@@ -472,9 +472,11 @@ export class Profiles extends ProfilesCache {
 
         const createNewConfig = "Create a New Team Configuration File";
         const editConfig = "Edit Team Configuration File";
+        const openConfigWebview = "Open Config Editor (Webview)";
 
         const configPick = new FilterDescriptor("\uFF0B " + createNewConfig);
         const configEdit = new FilterDescriptor("\u270F " + editConfig);
+        const configWebview = new FilterDescriptor("\uD83C\uDF10 " + openConfigWebview);
         const items: vscode.QuickPickItem[] = [];
         let mProfileInfo: imperative.ProfileInfo;
         try {
@@ -493,7 +495,7 @@ export class Profiles extends ProfilesCache {
         const quickpick = Gui.createQuickPick();
         let addProfilePlaceholder = "";
         const createNewInstruction = vscode.l10n.t(
-            "Select 'Create a New Team Configuration File' to define profiles, or 'Edit Team Configuration File' to update existing profiles"
+            "Select 'Create a New Team Configuration File' to define profiles, 'Edit Team Configuration File' to update existing profiles, or 'Open Config Editor (Webview)' to edit in a visual editor"
         );
         switch (zoweFileProvider.getTreeType()) {
             case PersistenceSchemaEnum.Dataset:
@@ -519,9 +521,9 @@ export class Profiles extends ProfilesCache {
                 });
         }
         if (allProfiles.length > 0) {
-            quickpick.items = [configPick, configEdit, ...items];
+            quickpick.items = [configPick, configEdit, configWebview, ...items];
         } else {
-            quickpick.items = [configPick, ...items];
+            quickpick.items = [configPick, configWebview, ...items];
         }
         quickpick.placeholder = addProfilePlaceholder;
         quickpick.title = vscode.l10n.t("Add Profile to Tree");
@@ -541,6 +543,10 @@ export class Profiles extends ProfilesCache {
         }
         if (choice === configEdit) {
             await this.editZoweConfigFile();
+            return;
+        }
+        if (choice === configWebview) {
+            await vscode.commands.executeCommand("zowe.openConfigEditorWebview");
             return;
         }
         let chosenProfile: string = "";

@@ -9,7 +9,7 @@
  *
  */
 
-import { WebView, FileManagement } from "@zowe/zowe-explorer-api";
+import { WebView, FileManagement, ProfilesCache } from "@zowe/zowe-explorer-api";
 import * as vscode from "vscode";
 import * as fs from "fs/promises";
 import * as path from "path";
@@ -58,7 +58,34 @@ export class ConfigEditor extends WebView {
             return;
         }
 
-        // Open the editor
+        // Open the text editor
+        const document = await vscode.workspace.openTextDocument(configPath);
+        await vscode.window.showTextDocument(document);
+    }
+
+    public static async displayWebview(context: vscode.ExtensionContext): Promise<void> {
+        // Try to find config file using the same logic as Zowe Explorer
+        const configPath = await ConfigEditor.findConfigFile();
+
+        if (!configPath) {
+            const createConfig = vscode.l10n.t("Create Config");
+            const openFolder = vscode.l10n.t("Open Folder");
+            const result = await vscode.window.showErrorMessage(
+                vscode.l10n.t("No zowe.config.json found. Checked workspace and ~/.zowe directory."),
+                createConfig,
+                openFolder
+            );
+
+            if (result === createConfig) {
+                // Trigger the create config command if it exists
+                await vscode.commands.executeCommand("zowe.all.config.init");
+            } else if (result === openFolder) {
+                await vscode.commands.executeCommand("vscode.openFolder");
+            }
+            return;
+        }
+
+        // Open the webview editor
         if (ConfigEditor.instance) {
             ConfigEditor.instance.panel?.reveal();
         } else {
@@ -127,6 +154,9 @@ export class ConfigEditor extends WebView {
                 case "get-profile-schemas":
                     await this.sendProfileSchemas(message.requestId);
                     break;
+                case "get-valid-profile-types":
+                    await this.sendValidProfileTypes(message.requestId);
+                    break;
                 case "update-config-data":
                     await this.updateConfigData(message.payload, message.requestId);
                     break;
@@ -135,6 +165,14 @@ export class ConfigEditor extends WebView {
                     break;
                 case "delete-config-row":
                     await this.deleteConfigRow(message.payload, message.requestId);
+                    break;
+                case "save-profile":
+                    await this.saveProfile(message.payload, message.requestId);
+                    break;
+                case "show-error":
+                    if (message.payload?.message) {
+                        vscode.window.showErrorMessage(message.payload.message);
+                    }
                     break;
                 case "GET_LOCALIZATION":
                     await this.sendLocalization();
@@ -289,6 +327,9 @@ export class ConfigEditor extends WebView {
      * Get schema properties for each profile type
      */
     private async getProfileTypeSchemas(): Promise<Record<string, string[]>> {
+        const profilesCache = Profiles.getInstance();
+        const configArray = profilesCache.getConfigArray();
+        console.log("Config array from ProfilesCache in getProfileTypeSchemas:", configArray);
         try {
             let profileTypeSchemas: Record<string, string[]> = {};
 
@@ -336,6 +377,16 @@ export class ConfigEditor extends WebView {
             // Return empty object if we can't get schemas
             return {};
         }
+    }
+
+    private async sendValidProfileTypes(requestId: string): Promise<void> {
+        const schemas = await this.getProfileTypeSchemas();
+        const validTypes = Object.keys(schemas);
+
+        await this.panel.webview.postMessage({
+            requestId,
+            payload: validTypes,
+        });
     }
 
     private async sendProfileSchemas(requestId: string): Promise<void> {
@@ -503,6 +554,98 @@ export class ConfigEditor extends WebView {
         }
     }
 
+    private async saveProfile(saveMessage: { section: string; profileData: any }, requestId: string): Promise<void> {
+        if (!this.configData || !this.configPath) {
+            throw new Error("Config data not loaded");
+        }
+
+        const { profileData } = saveMessage;
+
+        try {
+            if (!this.configData.profiles) {
+                this.configData.profiles = {};
+            }
+
+            const profileName = profileData.profileName;
+            const profileType = profileData.type;
+            const parentName = profileData.parent;
+
+            if (!profileName) {
+                throw new Error("Profile name is required");
+            }
+
+            // Determine where to save the profile
+            let targetProfiles = this.configData.profiles;
+
+            if (parentName) {
+                // Profile has a parent - save it nested under parent
+                if (!this.configData.profiles[parentName]) {
+                    // Create parent base profile if it doesn't exist
+                    this.configData.profiles[parentName] = {
+                        properties: {},
+                        profiles: {},
+                    };
+                }
+
+                // Ensure parent has profiles object
+                if (!this.configData.profiles[parentName].profiles) {
+                    this.configData.profiles[parentName].profiles = {};
+                }
+
+                targetProfiles = this.configData.profiles[parentName].profiles!;
+            }
+
+            // Create or update the profile in the target location
+            if (!targetProfiles[profileName]) {
+                targetProfiles[profileName] = {
+                    type: profileType,
+                    properties: {},
+                };
+            }
+
+            // Update type if changed
+            if (profileType) {
+                targetProfiles[profileName].type = profileType;
+            }
+
+            // Initialize properties object if it doesn't exist
+            if (!targetProfiles[profileName].properties) {
+                targetProfiles[profileName].properties = {};
+            }
+
+            // Update all properties from profileData
+            Object.keys(profileData).forEach((key) => {
+                if (key !== "profileName" && key !== "type" && key !== "authType" && key !== "parent" && key !== "_fullPath") {
+                    const value = profileData[key];
+                    // Only save non-empty values
+                    if (value !== "" && value !== null && value !== undefined) {
+                        targetProfiles[profileName].properties[key] = value;
+                    } else {
+                        // Remove empty properties
+                        delete targetProfiles[profileName].properties[key];
+                    }
+                }
+            });
+
+            // Write updated config back to file
+            const formattedConfig = JSON.stringify(this.configData, null, 2);
+            await fs.writeFile(this.configPath, formattedConfig, { encoding: "utf8" });
+
+            ZoweLogger.info(`[ConfigEditor] Saved profile: ${parentName ? `${String(parentName)}.${String(profileName)}` : String(profileName)}`);
+
+            // Send success response
+            await this.panel.webview.postMessage({
+                requestId,
+                payload: { success: true },
+            });
+        } catch (error) {
+            ZoweLogger.error(`[ConfigEditor] Failed to save profile: ${String(error)}`);
+            // Send error to show in VS Code notification
+            vscode.window.showErrorMessage(`Failed to save profile: ${String(error)}`);
+            throw error;
+        }
+    }
+
     private async addConfigRow(addMessage: { section: string; rowData: any }, requestId: string): Promise<void> {
         if (!this.configData || !this.configPath) {
             throw new Error("Config data not loaded");
@@ -589,10 +732,29 @@ export class ConfigEditor extends WebView {
         const { section, rowData } = deleteMessage;
 
         try {
-            switch (section) {
+            // Handle section names that include profile type (e.g., "Profiles: RSE")
+            const normalizedSection = section.startsWith("Profiles:") ? "Profiles" : section;
+
+            switch (normalizedSection) {
                 case "Profiles":
                     if (this.configData.profiles && rowData.profileName) {
-                        delete this.configData.profiles[rowData.profileName];
+                        const profileName = rowData.profileName;
+                        const parentName = rowData.parent;
+
+                        if (parentName) {
+                            // Delete nested profile
+                            if (this.configData.profiles[parentName]?.profiles?.[profileName]) {
+                                delete this.configData.profiles[parentName].profiles[profileName];
+
+                                // If parent has no more nested profiles, remove the profiles object
+                                if (Object.keys(this.configData.profiles[parentName].profiles).length === 0) {
+                                    delete this.configData.profiles[parentName].profiles;
+                                }
+                            }
+                        } else {
+                            // Delete top-level profile
+                            delete this.configData.profiles[profileName];
+                        }
                     }
                     break;
 

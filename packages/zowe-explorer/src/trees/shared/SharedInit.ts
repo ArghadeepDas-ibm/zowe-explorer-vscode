@@ -112,6 +112,12 @@ export class SharedInit {
             })
         );
 
+        context.subscriptions.push(
+            vscode.commands.registerCommand("zowe.openConfigEditorWebview", async () => {
+                await ConfigEditor.displayWebview(context);
+            })
+        );
+
         // Display release notes on activation
         ReleaseNotes.display(context, false);
 

@@ -91,6 +91,68 @@ export function App() {
   const [otherData, setOtherData] = useState<SimpleRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [editingCell, setEditingCell] = useState<{ section: string; groupIndex?: number; rowIndex: number; field: string } | null>(null);
+  const [addingProfileType, setAddingProfileType] = useState<boolean>(false);
+  const [newProfileTypeName, setNewProfileTypeName] = useState<string>("");
+  const [modifiedProfiles, setModifiedProfiles] = useState<Set<string>>(new Set());
+
+  // Column resizing functionality
+  useEffect(() => {
+    const initColumnResize = () => {
+      const tables = document.querySelectorAll(".config-table");
+
+      tables.forEach((table) => {
+        const headers = table.querySelectorAll("th");
+
+        // Add resize handles only (CSS widths are already set)
+        headers.forEach((th) => {
+          const thElement = th as HTMLElement;
+          // Skip if resize handle already exists or if it's a fixed column
+          if (
+            thElement.querySelector(".resize-handle") ||
+            thElement.classList.contains("indent-cell") ||
+            thElement.classList.contains("actions-column")
+          ) {
+            return;
+          }
+
+          const resizeHandle = document.createElement("div");
+          resizeHandle.className = "resize-handle";
+          thElement.appendChild(resizeHandle);
+
+          let startX = 0;
+          let startWidth = 0;
+
+          const onMouseDown = (e: MouseEvent) => {
+            e.preventDefault();
+            startX = e.pageX;
+            startWidth = thElement.offsetWidth;
+            resizeHandle.classList.add("resizing");
+
+            document.addEventListener("mousemove", onMouseMove);
+            document.addEventListener("mouseup", onMouseUp);
+          };
+
+          const onMouseMove = (e: MouseEvent) => {
+            const diff = e.pageX - startX;
+            const newWidth = Math.max(80, startWidth + diff); // Minimum 80px (matches CSS min-width)
+            thElement.style.width = `${newWidth}px`;
+          };
+
+          const onMouseUp = () => {
+            resizeHandle.classList.remove("resizing");
+            document.removeEventListener("mousemove", onMouseMove);
+            document.removeEventListener("mouseup", onMouseUp);
+          };
+
+          resizeHandle.addEventListener("mousedown", onMouseDown);
+        });
+      });
+    };
+
+    // Initialize after a short delay to ensure DOM is ready
+    const timer = setTimeout(initColumnResize, 100);
+    return () => clearTimeout(timer);
+  }, [profileGroups, defaultsData, otherData]);
 
   useEffect(() => {
     // Apply theme
@@ -140,34 +202,53 @@ export function App() {
       schemas,
     });
 
-    // Process profiles - group by type
+    // Process profiles - group by type (handles both flat and nested structures)
     if (data.profiles) {
       const profilesByType: Record<string, ProfileRow[]> = {};
 
-      Object.entries(data.profiles).forEach(([profileName, profileConfig]) => {
-        if (typeof profileConfig === "object" && profileConfig !== null) {
-          const profileType = profileConfig.type || "unknown";
-          console.log(`Processing profile: ${profileName}, type: ${profileType}`, profileConfig);
-
-          const flatProfile: ProfileRow = {
-            profileName,
-            type: profileType,
-            authType: status?.[profileName]?.authType || "Unknown",
-          };
-
-          // Flatten properties
-          if (profileConfig.properties) {
-            Object.entries(profileConfig.properties).forEach(([key, value]) => {
-              flatProfile[key] = value;
-            });
-          }
-
-          // Group by type
-          if (!profilesByType[profileType]) {
-            profilesByType[profileType] = [];
-          }
-          profilesByType[profileType].push(flatProfile);
+      // Recursive function to process profiles at any level
+      const processProfile = (profileName: string, profileConfig: any, parentName?: string) => {
+        if (typeof profileConfig !== "object" || profileConfig === null) {
+          return;
         }
+
+        const profileType = profileConfig.type || "base";
+        const fullProfileName = parentName ? `${parentName}.${profileName}` : profileName;
+
+        console.log(`Processing profile: ${fullProfileName}, type: ${profileType}`, profileConfig);
+
+        const flatProfile: ProfileRow = {
+          profileName: profileName, // Store only the profile name, not the full path
+          type: profileType,
+          authType: status?.[fullProfileName]?.authType || status?.[profileName]?.authType || "Unknown",
+          parent: parentName || "", // Always include parent field (empty for top-level profiles)
+          _fullPath: fullProfileName, // Store full path for internal use
+        };
+
+        // Flatten properties
+        if (profileConfig.properties) {
+          Object.entries(profileConfig.properties).forEach(([key, value]) => {
+            flatProfile[key] = value;
+          });
+        }
+
+        // Group by type
+        if (!profilesByType[profileType]) {
+          profilesByType[profileType] = [];
+        }
+        profilesByType[profileType].push(flatProfile);
+
+        // Process nested profiles recursively
+        if (profileConfig.profiles) {
+          Object.entries(profileConfig.profiles).forEach(([nestedName, nestedConfig]) => {
+            processProfile(nestedName, nestedConfig, fullProfileName);
+          });
+        }
+      };
+
+      // Process all top-level profiles
+      Object.entries(data.profiles).forEach(([profileName, profileConfig]) => {
+        processProfile(profileName, profileConfig);
       });
 
       console.log("profilesByType:", profilesByType);
@@ -178,16 +259,21 @@ export function App() {
         const allowedProperties = schemas?.[profileType] || null;
         console.log(`Creating group for ${profileType}, allowedProperties:`, allowedProperties);
 
-        // Dynamically create columns based on all keys found in this type
+        // Build set of all keys to display
         const allKeys = new Set<string>();
+
+        // Always include core fields
+        allKeys.add("profileName");
+
+        // If we have schema properties, include ALL of them (even if not populated)
+        if (allowedProperties && allowedProperties.length > 0) {
+          allowedProperties.forEach((prop) => allKeys.add(prop));
+        }
+
+        // Also include any additional keys found in profiles (for properties not in schema)
         profiles.forEach((profile) => {
           Object.keys(profile).forEach((key) => {
-            // Always include core fields
-            if (key === "profileName" || key === "type" || key === "authType") {
-              allKeys.add(key);
-            }
-            // If we have a schema, only include allowed properties
-            else if (!allowedProperties || allowedProperties.includes(key)) {
+            if (key !== "type" && key !== "authType" && key !== "parent") {
               allKeys.add(key);
             }
           });
@@ -195,14 +281,25 @@ export function App() {
 
         console.log(`Keys for ${profileType}:`, Array.from(allKeys));
 
+        // Ensure all profiles have all properties (fill with empty string if missing)
+        profiles.forEach((profile) => {
+          allKeys.forEach((key) => {
+            if (!(key in profile)) {
+              profile[key] = "";
+            }
+          });
+        });
+
+        // Build columns - ALWAYS include Parent column
         const columns: Column[] = [
           { field: "authType", headerName: "Auth Type", editable: false },
+          { field: "parent", headerName: "Parent", editable: true },
           ...Array.from(allKeys)
-            .filter((key) => key !== "authType" && key !== "type")
+            .filter((key) => key !== "authType" && key !== "type" && key !== "parent" && key !== "_fullPath")
             .map((key) => ({
               field: key,
               headerName: key.charAt(0).toUpperCase() + key.slice(1),
-              editable: key !== "profileName",
+              editable: true, // Make all columns editable including profileName
             })),
         ];
 
@@ -243,44 +340,38 @@ export function App() {
     setProfileGroups((prev) => prev.map((group, idx) => (idx === groupIndex ? { ...group, expanded: !group.expanded } : group)));
   };
 
-  const handleCellEdit = async (section: string, groupIndex: number | undefined, rowIndex: number, field: string, newValue: string) => {
+  const handleCellEdit = (section: string, groupIndex: number | undefined, rowIndex: number, field: string, newValue: string) => {
     try {
-      let rowData: any;
-      let sectionTitle: string;
-
+      // Update local state only (don't save to backend yet)
       if (section === "profiles" && groupIndex !== undefined) {
-        rowData = profileGroups[groupIndex].profiles[rowIndex];
-        sectionTitle = `Profiles: ${profileGroups[groupIndex].type.toUpperCase()}`;
-      } else if (section === "defaults") {
-        rowData = defaultsData[rowIndex];
-        sectionTitle = "Defaults";
-      } else {
-        rowData = otherData[rowIndex];
-        sectionTitle = "Other Settings";
-      }
+        const profile = profileGroups[groupIndex].profiles[rowIndex];
+        const profileIdentifier = profile._fullPath || profile.profileName;
 
-      const oldValue = rowData[field];
-
-      await messageHandler.request("update-config-data", {
-        section: sectionTitle,
-        rowData,
-        field,
-        oldValue,
-        newValue,
-      });
-
-      // Update local state
-      if (section === "profiles" && groupIndex !== undefined) {
         setProfileGroups((prev) =>
           prev.map((group, idx) =>
             idx === groupIndex
               ? {
                   ...group,
-                  profiles: group.profiles.map((profile, pIdx) => (pIdx === rowIndex ? { ...profile, [field]: newValue } : profile)),
+                  profiles: group.profiles.map((p, pIdx) => {
+                    if (pIdx === rowIndex) {
+                      const updatedProfile = { ...p, [field]: newValue };
+                      // Update _fullPath when parent or profileName changes
+                      if (field === "parent" || field === "profileName") {
+                        const newParent = field === "parent" ? newValue : p.parent;
+                        const newName = field === "profileName" ? newValue : p.profileName;
+                        updatedProfile._fullPath = newParent ? `${newParent}.${newName}` : newName;
+                      }
+                      return updatedProfile;
+                    }
+                    return p;
+                  }),
                 }
               : group
           )
         );
+
+        // Mark this profile as modified (use _fullPath for identification)
+        setModifiedProfiles((prev) => new Set(prev).add(profileIdentifier));
       } else if (section === "defaults") {
         setDefaultsData((prev) => prev.map((row, idx) => (idx === rowIndex ? { ...row, [field]: newValue } : row)));
       } else {
@@ -289,7 +380,31 @@ export function App() {
 
       setEditingCell(null);
     } catch (err) {
-      setError(`Failed to update config: ${err}`);
+      messageHandler.send("show-error", { message: `Failed to update cell: ${err}` });
+    }
+  };
+
+  const handleSaveProfile = async (groupIndex: number, rowIndex: number) => {
+    try {
+      const group = profileGroups[groupIndex];
+      const profile = group.profiles[rowIndex];
+      const sectionTitle = `Profiles: ${group.type.toUpperCase()}`;
+      const profileIdentifier = profile._fullPath || profile.profileName;
+
+      // Send the entire profile data to backend for saving
+      await messageHandler.request("save-profile", {
+        section: sectionTitle,
+        profileData: profile,
+      });
+
+      // Remove from modified set (use _fullPath for identification)
+      setModifiedProfiles((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(profileIdentifier);
+        return newSet;
+      });
+    } catch (err) {
+      messageHandler.send("show-error", { message: `Failed to save profile: ${err}` });
     }
   };
 
@@ -338,46 +453,134 @@ export function App() {
 
   const handleAddRow = async (section: string, groupIndex?: number) => {
     try {
-      let newRow: any;
-      let sectionTitle: string;
-
+      // Just add row locally - user will fill in values and they'll be saved on edit
       if (section === "profiles" && groupIndex !== undefined) {
-        const profileType = profileGroups[groupIndex].type;
-        newRow = { profileName: "new_profile", type: profileType };
-        sectionTitle = `Profiles: ${profileType.toUpperCase()}`;
-      } else if (section === "defaults") {
-        newRow = { setting: "new_setting", value: "" };
-        sectionTitle = "Defaults";
-      } else {
-        newRow = { property: "new_property", value: "" };
-        sectionTitle = "Other Settings";
-      }
+        const group = profileGroups[groupIndex];
+        const profileType = group.type;
 
-      await messageHandler.request("add-config-row", {
-        section: sectionTitle,
-        rowData: newRow,
-      });
+        // Create new profile with all columns from the group
+        const newProfile: ProfileRow = {
+          profileName: "",
+          type: profileType,
+          authType: "None",
+          parent: "", // Always include parent field
+          _fullPath: "", // Internal tracking
+        };
 
-      // Update local state
-      if (section === "profiles" && groupIndex !== undefined) {
+        // Initialize all other columns from the group's column definition
+        group.columns.forEach((col) => {
+          if (col.field !== "authType" && col.field !== "profileName" && col.field !== "parent" && col.field !== "_fullPath") {
+            newProfile[col.field] = "";
+          }
+        });
+
+        // Update local state immediately
         setProfileGroups((prev) =>
           prev.map((group, idx) =>
             idx === groupIndex
               ? {
                   ...group,
-                  profiles: [...group.profiles, { ...newRow, authType: "None" }],
+                  profiles: [...group.profiles, newProfile],
                 }
               : group
           )
         );
       } else if (section === "defaults") {
+        const newRow = { setting: "", value: "" };
         setDefaultsData((prev) => [...prev, newRow]);
       } else {
+        const newRow = { property: "", value: "" };
         setOtherData((prev) => [...prev, newRow]);
       }
     } catch (err) {
-      setError(`Failed to add row: ${err}`);
+      // Show error in VS Code instead of full-page error
+      messageHandler.send("show-error", { message: `Failed to add row: ${err}` });
     }
+  };
+
+  const handleAddProfileType = () => {
+    // Show the input row for adding a new profile type
+    setAddingProfileType(true);
+    setNewProfileTypeName("");
+  };
+
+  const handleValidateAndCreateProfileType = async () => {
+    try {
+      const trimmedType = newProfileTypeName.trim().toLowerCase();
+
+      if (!trimmedType) {
+        setAddingProfileType(false);
+        setNewProfileTypeName("");
+        return;
+      }
+
+      // Request valid profile types and schemas from backend
+      const validTypes = await messageHandler.request<string[]>("get-valid-profile-types");
+      const schemas = await messageHandler.request<Record<string, string[]>>("get-profile-schemas");
+
+      // Check if profile type already exists
+      if (profileGroups.some((group) => group.type === trimmedType)) {
+        messageHandler.send("show-error", {
+          message: `Profile type "${trimmedType}" already exists.`,
+        });
+        setAddingProfileType(false);
+        setNewProfileTypeName("");
+        return;
+      }
+
+      // Validate against schema
+      if (!validTypes.includes(trimmedType)) {
+        messageHandler.send("show-error", {
+          message: `"${trimmedType}" is not a valid profile type. Valid types are: ${validTypes.join(", ")}`,
+        });
+        setAddingProfileType(false);
+        setNewProfileTypeName("");
+        return;
+      }
+
+      // Get schema properties for this profile type
+      const allowedProperties = schemas?.[trimmedType] || [];
+
+      // Build columns from schema properties
+      const allKeys = new Set<string>();
+      allKeys.add("profileName");
+      allKeys.add("parent"); // Always include parent column
+      allowedProperties.forEach((prop) => allKeys.add(prop));
+
+      const columns: Column[] = [
+        { field: "authType", headerName: "Auth Type", editable: false },
+        ...Array.from(allKeys)
+          .filter((key) => key !== "authType" && key !== "type" && key !== "_fullPath")
+          .map((key) => ({
+            field: key,
+            headerName: key.charAt(0).toUpperCase() + key.slice(1),
+            editable: true,
+          })),
+      ];
+
+      const newGroup: ProfileGroup = {
+        type: trimmedType,
+        profiles: [], // Start with no profiles - user will add using "Add Row" button
+        columns,
+        expanded: true, // Start expanded
+      };
+
+      // Update local state - user will add profiles using "Add Row" button
+      setProfileGroups((prev) => [...prev, newGroup]);
+
+      // Reset the adding state
+      setAddingProfileType(false);
+      setNewProfileTypeName("");
+    } catch (err) {
+      messageHandler.send("show-error", { message: `Failed to add profile type: ${err}` });
+      setAddingProfileType(false);
+      setNewProfileTypeName("");
+    }
+  };
+
+  const handleCancelAddProfileType = () => {
+    setAddingProfileType(false);
+    setNewProfileTypeName("");
   };
 
   if (error) {
@@ -412,15 +615,52 @@ export function App() {
       </div>
 
       {/* Profiles Section with Accordion-style Grouping */}
-      {profileGroups.length > 0 ? (
-        <div className="config-section">
-          <div className="config-section-header">
-            <h2>Profiles</h2>
-          </div>
+      <div className="config-section">
+        <div className="config-section-header">
+          <h2>Profiles</h2>
+          <button className="add-row-btn" onClick={handleAddProfileType}>
+            <span className="codicon codicon-add"></span>
+            Add Profile Type
+          </button>
+        </div>
 
+        {profileGroups.length > 0 || addingProfileType ? (
           <div className="table-container">
             <table className="config-table">
               <tbody>
+                {/* New Profile Type Input Row */}
+                {addingProfileType && (
+                  <tr className="group-row new-profile-type-row">
+                    <td className="group-cell" colSpan={100}>
+                      <div className="group-cell-content">
+                        <span className="codicon codicon-symbol-class" style={{ color: "var(--vscode-charts-blue)" }}></span>
+                        <input
+                          type="text"
+                          className="profile-type-input"
+                          placeholder="Enter profile type name (e.g., zosmf, ssh, ftp)"
+                          value={newProfileTypeName}
+                          onChange={(e) => setNewProfileTypeName((e.target as HTMLInputElement).value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              handleValidateAndCreateProfileType();
+                            } else if (e.key === "Escape") {
+                              handleCancelAddProfileType();
+                            }
+                          }}
+                          onBlur={handleValidateAndCreateProfileType}
+                          autoFocus
+                        />
+                        <button className="icon-btn" onClick={handleValidateAndCreateProfileType} title="Create Profile Type">
+                          <span className="codicon codicon-check"></span>
+                        </button>
+                        <button className="icon-btn" onClick={handleCancelAddProfileType} title="Cancel">
+                          <span className="codicon codicon-close"></span>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+
                 {profileGroups.map((group, groupIndex) => (
                   <>
                     {/* Parent Row - Profile Type Group */}
@@ -457,12 +697,77 @@ export function App() {
 
                         {/* Profile Rows */}
                         {group.profiles.map((profile, rowIndex) => (
-                          <tr key={`profile-${groupIndex}-${rowIndex}`} className="child-row">
+                          <tr key={`profile-${groupIndex}-${rowIndex}`} className={`child-row ${profile.parent ? "nested-profile" : ""}`}>
                             <td className="indent-cell"></td>
                             {group.columns.map((col) => (
                               <td key={col.field}>
-                                {col.field === "authType" ? (
+                                {col.field === "parent" ? (
+                                  col.editable &&
+                                  editingCell?.section === "profiles" &&
+                                  editingCell?.groupIndex === groupIndex &&
+                                  editingCell?.rowIndex === rowIndex &&
+                                  editingCell?.field === col.field ? (
+                                    <input
+                                      type="text"
+                                      className="cell-input"
+                                      defaultValue={profile.parent || ""}
+                                      autoFocus
+                                      onBlur={(e) => handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value);
+                                        } else if (e.key === "Escape") {
+                                          setEditingCell(null);
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <div
+                                      className={col.editable ? "editable-cell" : ""}
+                                      onClick={() => col.editable && setEditingCell({ section: "profiles", groupIndex, rowIndex, field: col.field })}
+                                    >
+                                      {profile.parent || ""}
+                                    </div>
+                                  )
+                                ) : col.field === "profileName" ? (
+                                  col.editable &&
+                                  editingCell?.section === "profiles" &&
+                                  editingCell?.groupIndex === groupIndex &&
+                                  editingCell?.rowIndex === rowIndex &&
+                                  editingCell?.field === col.field ? (
+                                    <input
+                                      type="text"
+                                      className="cell-input"
+                                      defaultValue={profile[col.field] || ""}
+                                      autoFocus
+                                      onBlur={(e) => handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === "Enter") {
+                                          handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value);
+                                        } else if (e.key === "Escape") {
+                                          setEditingCell(null);
+                                        }
+                                      }}
+                                    />
+                                  ) : (
+                                    <div
+                                      className={col.editable ? "editable-cell" : ""}
+                                      onClick={() => col.editable && setEditingCell({ section: "profiles", groupIndex, rowIndex, field: col.field })}
+                                    >
+                                      {profile[col.field] !== undefined ? String(profile[col.field]) : ""}
+                                    </div>
+                                  )
+                                ) : col.field === "authType" ? (
                                   <AuthTypeIcon authType={profile[col.field] || "None"} />
+                                ) : col.field === "protocol" && col.editable ? (
+                                  <select
+                                    className="cell-select"
+                                    value={profile[col.field] || "https"}
+                                    onChange={(e) => handleCellEdit("profiles", groupIndex, rowIndex, col.field, e.currentTarget.value)}
+                                  >
+                                    <option value="https">https</option>
+                                    <option value="http">http</option>
+                                  </select>
                                 ) : col.editable &&
                                   editingCell?.section === "profiles" &&
                                   editingCell?.groupIndex === groupIndex &&
@@ -493,6 +798,11 @@ export function App() {
                               </td>
                             ))}
                             <td className="actions-column">
+                              {modifiedProfiles.has(profile._fullPath || profile.profileName) && (
+                                <button className="save-row-btn" onClick={() => handleSaveProfile(groupIndex, rowIndex)} title="Save changes">
+                                  <span className="codicon codicon-save"></span>
+                                </button>
+                              )}
                               <button className="delete-row-btn" onClick={() => handleDeleteRow("profiles", groupIndex, rowIndex)}>
                                 <span className="codicon codicon-trash"></span>
                               </button>
@@ -506,12 +816,10 @@ export function App() {
               </tbody>
             </table>
           </div>
-        </div>
-      ) : (
-        <div className="config-section">
-          <p>No profile groups found</p>
-        </div>
-      )}
+        ) : (
+          <p>No profile groups found. Click "Add Profile Type" to create one.</p>
+        )}
+      </div>
 
       {/* Defaults Section */}
       {defaultsData.length > 0 && (
@@ -551,9 +859,7 @@ export function App() {
                           }}
                         />
                       ) : (
-                        <div className="editable-cell" onClick={() => setEditingCell({ section: "defaults", rowIndex, field: "setting" })}>
-                          {row.setting}
-                        </div>
+                        <div className="non-editable-cell">{row.setting}</div>
                       )}
                     </td>
                     <td>
@@ -579,8 +885,12 @@ export function App() {
                       )}
                     </td>
                     <td className="actions-column">
-                      <button className="delete-row-btn" onClick={() => handleDeleteRow("defaults", undefined, rowIndex)}>
-                        <span className="codicon codicon-trash"></span>
+                      <button
+                        className="edit-row-btn"
+                        onClick={() => setEditingCell({ section: "defaults", rowIndex, field: "value" })}
+                        title="Edit value"
+                      >
+                        <span className="codicon codicon-edit"></span>
                       </button>
                     </td>
                   </tr>
